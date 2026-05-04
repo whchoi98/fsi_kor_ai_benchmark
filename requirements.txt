@@ -1,0 +1,4 @@
+# fsi-kor-ai-benchmark — Python dependencies
+# README states "boto3 1.42+ tested". Pin a floor, not a ceiling, so that
+# Bedrock model releases stay reachable without manual bumps.
+boto3>=1.42

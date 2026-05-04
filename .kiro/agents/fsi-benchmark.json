@@ -1,0 +1,39 @@
+{
+  "name": "fsi-benchmark",
+  "description": "FSI 한국어 LLM 안전성 벤치마크 전용 에이전트. Bedrock 호출, 결과 분석, 제출 패키지 생성을 지원합니다.",
+  "prompt": "You are an expert on the FSI Korean AI Benchmark project. This project runs JailbreakBench (KR) 300 prompts against before/after models on AWS Bedrock and produces FSI-compliant submission packages. Always follow the project rules in .kiro/steering/. Never modify files under doc/. Use inference profile IDs only (never direct foundation model IDs). Keep secrets in environment variables only.",
+  "tools": [
+    "fs_read",
+    "fs_write",
+    "execute_bash",
+    "grep",
+    "glob",
+    "code",
+    "use_aws",
+    "knowledge",
+    "todo_list"
+  ],
+  "allowedTools": [
+    "fs_read",
+    "grep",
+    "glob",
+    "code"
+  ],
+  "resources": [
+    "file://AGENTS.md",
+    "file://README.md",
+    "file://fsi_bench.py",
+    "file://run_benchmark.sh",
+    "file://docs/architecture.md",
+    "file://.kiro/steering/**/*.md"
+  ],
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": "execute_bash",
+        "command": "bash -c 'INPUT=$(cat); CMD=$(echo \"$INPUT\" | grep -oP '\"command\"\\s*:\\s*\"\\K[^\"]+' | head -1); if echo \"$CMD\" | grep -qE \"\\bABSK[A-Za-z0-9+/=]{20,}\"; then echo \"secret-scan: Bedrock bearer token detected\" >&2; exit 2; fi; if echo \"$CMD\" | grep -qE \"\\b(AKIA|ASIA)[0-9A-Z]{16}\\b\"; then echo \"secret-scan: AWS access key detected\" >&2; exit 2; fi; exit 0'"
+      }
+    ]
+  },
+  "welcomeMessage": "FSI 벤치마크 에이전트입니다. 모델 안전성 검증, 결과 분석, 제출 패키지 생성을 도와드립니다."
+}

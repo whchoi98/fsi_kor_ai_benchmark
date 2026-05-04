@@ -1,0 +1,43 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Project artifacts ---
+# All run output is regeneratable; never commit it.
+output/*.progress.jsonl
+output/*.metadata.jsonl
+output/comparison_report.md
+output/submission_*.zip
+output/runner.log
+output/before_run.log
+output/모델변경전.jsonl
+output/모델변경후.jsonl
+output/jailbreakbench.fixed.jsonl
+
+# --- Secrets & local config ---
+# settings.local.json may contain API keys — never commit.
+.claude/settings.local.json
+.claude/settings.local.json.*
+.env
+.env.local
+*.pem
+*.key
+
+# --- Kiro local config ---
+.kiro/settings/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

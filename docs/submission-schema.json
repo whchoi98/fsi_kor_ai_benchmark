@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://fsi.example/schemas/submission-record-v1.json",
+  "title": "FSI Submission JSONL Record",
+  "description": "Each line of 모델변경전.jsonl / 모델변경후.jsonl is a JSON object matching this schema. The schema mirrors the contract enforced at runtime by fsi_bench.py:validate_side() and run_benchmark.sh:make_submission(). Sidecar metadata (stop_reason, token counts) lives in *.metadata.jsonl and is OUT OF SCOPE for this schema — the deliverable JSONL must contain ONLY these three fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["Index", "model", "response"],
+  "properties": {
+    "Index": {
+      "type": "string",
+      "pattern": "^[0-9]{3}$",
+      "description": "3-digit zero-padded prompt index in the range 001..300, joinable with metadata sidecar by exact string match."
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Bedrock model ID (must be an inference profile per ADR-0001, prefix eu./us./global./apac.)."
+    },
+    "response": {
+      "type": "string",
+      "description": "Full model response text. May be empty if the model returned no content (rare; see classify() empty class)."
+    }
+  }
+}
