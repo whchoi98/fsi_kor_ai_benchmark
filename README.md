@@ -141,7 +141,6 @@ This project is released under the [MIT License](LICENSE). The bundled Jailbreak
 
 ## Contact
 
-- Maintainer: FSI AI Red Team
 - Issues: [GitHub Issues](https://github.com/fsi-redteam/fsi-kor-ai-benchmark/issues)
 - Email: whchoi98@gmail.com
 
@@ -277,7 +276,6 @@ fsi_kor_ai_benchmark/
 
 ## 연락처
 
-- 메인테이너: FSI AI Red Team
 - 이슈 트래커: [GitHub Issues](https://github.com/fsi-redteam/fsi-kor-ai-benchmark/issues)
 - 이메일: whchoi98@gmail.com
 
