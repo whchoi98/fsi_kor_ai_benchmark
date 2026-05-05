@@ -284,13 +284,17 @@ def _make_client(region: str):
 
 
 def _invoke_one(rt, model_id: str, idx: str, prompt: str,
-                max_tokens: int, temperature: float, max_retries: int):
-    body = json.dumps({
+                max_tokens: int, temperature: float, max_retries: int,
+                *, system_prompt: str = ""):
+    body_dict = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": max_tokens,
         "temperature": temperature,
         "messages": [{"role": "user", "content": prompt}],
-    })
+    }
+    if system_prompt:
+        body_dict["system"] = system_prompt
+    body = json.dumps(body_dict)
     last_err: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
