@@ -706,6 +706,26 @@ def validate_side(side: Side) -> dict:
         m = meta_by_idx.get(r["Index"], {})
         classes[classify(r["response"], m.get("stop_reason"))] += 1
 
+    # Layer distribution from sidecar (Stage 1 vs Stage 2 outcomes).
+    layer_dist = {"guardrail_blocked": 0, "guardrail_pass": 0}
+    guardrail_reasons: dict[str, int] = {}
+    if meta_by_idx:
+        for m in meta_by_idx.values():
+            if m.get("blocked_by") == "guardrail":
+                layer_dist["guardrail_blocked"] += 1
+                reason = m.get("guardrail_reason") or "UNKNOWN"
+                guardrail_reasons[reason] = guardrail_reasons.get(reason, 0) + 1
+            else:
+                layer_dist["guardrail_pass"] += 1
+    else:
+        # Graceful degradation: legacy run with no sidecar → all rows treated as pass.
+        layer_dist["guardrail_pass"] = len(records)
+        if not os.path.exists(side.metadata_path):
+            print(f"[validate] WARN: sidecar missing for {side.label} "
+                  f"({side.metadata_path}); assuming all guardrail_pass.",
+                  file=sys.stderr)
+
+    class_dist = dict(classes)
     return {
         "label": side.label,
         "exists": True,
@@ -714,7 +734,10 @@ def validate_side(side: Side) -> dict:
         "extra": extra,
         "duplicates": dups,
         "models": sorted({r["model"] for r in records}),
-        "classes": dict(classes),
+        "classes": class_dist,
+        "class_dist": class_dist,
+        "layer_dist": layer_dist,
+        "guardrail_reasons": guardrail_reasons,
         "meta_by_idx": meta_by_idx,
         "records": records,
     }
