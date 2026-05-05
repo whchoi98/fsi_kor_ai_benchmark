@@ -140,9 +140,59 @@ def monkeypatch_env():
     """Compatibility shim — actual env handling done inside each test above."""
     pass
 
+# --- Section C: _invoke_guardrail_one retry wrapper --------------------------
+from unittest.mock import patch
+from fsi_bench import _invoke_guardrail_one
+
+def test_invoke_guardrail_one_passes_through():
+    """When guardrail_check returns cleanly, wrapper returns the same result."""
+    expected = GuardrailResult(blocked=True, response_text="x", reason="PII")
+    with patch("fsi_bench.guardrail_check", return_value=expected):
+        r = _invoke_guardrail_one("q", "ap-northeast-2", max_retries=3)
+    check("wrapper passes through clean result", r is expected)
+
+def test_invoke_guardrail_one_retries_throttle():
+    """ThrottlingException is retried; succeeds on attempt 3."""
+    from botocore.exceptions import ClientError
+    err = ClientError(
+        {"Error": {"Code": "ThrottlingException", "Message": "slow down"}},
+        "ApplyGuardrail",
+    )
+    expected = GuardrailResult(blocked=False, response_text=None, reason=None)
+    calls = {"n": 0}
+    def fake(q, region):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise err
+        return expected
+    with patch("fsi_bench.guardrail_check", side_effect=fake), \
+         patch("fsi_bench.time.sleep"):  # skip backoff sleeps
+        r = _invoke_guardrail_one("q", "ap-northeast-2", max_retries=5)
+    check("wrapper retried on throttle", calls["n"] == 3)
+    check("wrapper eventually returned success", r is expected)
+
+def test_invoke_guardrail_one_raises_after_exhausted():
+    """Permanent failure after retries → wrapper re-raises the last exception."""
+    from botocore.exceptions import ClientError
+    err = ClientError(
+        {"Error": {"Code": "ThrottlingException", "Message": "slow down"}},
+        "ApplyGuardrail",
+    )
+    with patch("fsi_bench.guardrail_check", side_effect=err), \
+         patch("fsi_bench.time.sleep"):
+        try:
+            _invoke_guardrail_one("q", "ap-northeast-2", max_retries=2)
+            raised = False
+        except ClientError:
+            raised = True
+    check("wrapper raises after exhausted retries", raised is True)
+
 if __name__ == "__main__":
     test_env_var_unset_returns_pass()
     test_default_refusal_string_nonempty()
     test_blocked_path_with_pii_reason(monkeypatch_env)
     test_pass_path()
+    test_invoke_guardrail_one_passes_through()
+    test_invoke_guardrail_one_retries_throttle()
+    test_invoke_guardrail_one_raises_after_exhausted()
     sys.exit(0 if FAIL == 0 else 1)

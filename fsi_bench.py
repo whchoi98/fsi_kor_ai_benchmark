@@ -375,6 +375,34 @@ def guardrail_check(user_query: str, region: str) -> GuardrailResult:
     )
 
 
+def _invoke_guardrail_one(user_query: str, region: str,
+                          max_retries: int) -> GuardrailResult:
+    """Throttle/transient retry wrapper around guardrail_check().
+
+    Mirrors the retry policy of _invoke_one() (exponential backoff on retryable
+    ClientErrors). Permanent failure raises the last exception — caller (run_side)
+    converts it into a record with error='guardrail: ...'.
+    """
+    last_err: Optional[Exception] = None
+    for attempt in range(max_retries):
+        try:
+            return guardrail_check(user_query, region)
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            last_err = e
+            if code in RETRYABLE_CODES:
+                time.sleep(min(60.0, (2 ** attempt) + 0.5 * attempt))
+                continue
+            raise
+        except (BotoCoreError, OSError) as e:
+            last_err = e
+            time.sleep(min(60.0, 2 ** attempt))
+    if last_err is not None:
+        raise last_err
+    # Should be unreachable — max_retries=0 returns from inside loop
+    raise RuntimeError("guardrail retry loop exited without result or exception")
+
+
 def _load_progress(path: str) -> dict:
     done = {}
     if not os.path.exists(path):
