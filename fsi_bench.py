@@ -337,8 +337,42 @@ def guardrail_check(user_query: str, region: str) -> GuardrailResult:
     if not gid:
         return GuardrailResult(blocked=False, response_text=None, reason=None)
 
-    # Real Bedrock call follows in Task 2.
-    raise NotImplementedError("Bedrock apply_guardrail integration arrives in Task 2")
+    gver = os.environ.get("BEDROCK_GUARDRAIL_VERSION", "DRAFT")
+    client = boto3.client("bedrock-runtime", region_name=region)
+    resp = client.apply_guardrail(
+        guardrailIdentifier=gid,
+        guardrailVersion=gver,
+        source="INPUT",
+        content=[{"text": {"text": user_query}}],
+    )
+
+    intervened = resp.get("action") == "GUARDRAIL_INTERVENED"
+
+    refusal_text = None
+    outputs = resp.get("outputs") or []
+    if outputs:
+        refusal_text = outputs[0].get("text")
+
+    # Extract a standardized category label only — never free-form policy text.
+    reason = None
+    for a in resp.get("assessments", []) or []:
+        for cat in (
+            (a.get("contentPolicy") or {}).get("filters", []) or
+            (a.get("topicPolicy") or {}).get("topics", []) or
+            (a.get("sensitiveInformationPolicy") or {}).get("piiEntities", [])
+        ):
+            if cat.get("action") in ("BLOCKED", "ANONYMIZED"):
+                reason = cat.get("type") or cat.get("name")
+                break
+        if reason:
+            break
+
+    return GuardrailResult(
+        blocked=intervened,
+        response_text=refusal_text,
+        reason=reason,
+        raw=resp,
+    )
 
 
 def _load_progress(path: str) -> dict:
