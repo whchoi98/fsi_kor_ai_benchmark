@@ -122,6 +122,7 @@ pip install -r requirements.txt
 
 - Full bilingual README: [README.md](README.md)
 - Architecture: [docs/architecture.md](docs/architecture.md)
+- 사용자 도움말: [FSI 모델 변경 산출물 작성 가이드](docs/fsi-submission-guide.md) (엔드투엔드 시나리오 + FAQ)
 - ADRs: [docs/decisions/](docs/decisions/)
   - [ADR-0001 — Inference Profile Only](docs/decisions/ADR-0001-inference-profile-only.md) (Bedrock direct foundation ID 사용 금지)
   - [ADR-0002 — Two-stage pipeline (guardrail → guarded service)](docs/decisions/ADR-0002-two-stage-pipeline.md)
