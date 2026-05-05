@@ -41,3 +41,6 @@ Thumbs.db
 *.swo
 .idea/
 .vscode/
+
+# Git worktrees (subagent-driven-development isolation)
+.worktrees/
