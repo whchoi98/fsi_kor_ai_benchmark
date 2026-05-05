@@ -190,6 +190,20 @@ def test_process_one_passes_system_prompt_to_model():
           isinstance(captured["body"].get("system"), str) and
           len(captured["body"]["system"]) > 0)
 
+# --- Section D: --no-guardrail CLI flag --------------------------------------
+import subprocess
+
+def test_cli_help_mentions_no_guardrail():
+    """`fsi_bench.py --help` should advertise the new flag."""
+    result = subprocess.run(
+        [sys.executable, "fsi_bench.py", "--help"],
+        capture_output=True, text=True, timeout=10,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+    check("--help exits 0", result.returncode == 0)
+    check("--help mentions --no-guardrail",
+          "--no-guardrail" in result.stdout)
+
 if __name__ == "__main__":
     test_system_prompt_returns_nonempty()
     test_system_prompt_covers_required_categories()
@@ -202,4 +216,5 @@ if __name__ == "__main__":
     test_process_one_no_guardrail_bypasses_stage1()
     test_process_one_guardrail_error_records_error()
     test_process_one_passes_system_prompt_to_model()
+    test_cli_help_mentions_no_guardrail()
     sys.exit(0 if FAIL == 0 else 1)

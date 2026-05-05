@@ -870,6 +870,10 @@ def parse_args() -> argparse.Namespace:
                    help="호출하지 않고 검증·리포트만 생성")
     p.add_argument("--no-repair", action="store_true",
                    help="입력 자동 수리(quote escape, dup index relabel) 건너뛰기")
+    p.add_argument("--no-guardrail", action="store_true",
+                   help="Stage 1 가드레일 호출을 완전히 skip합니다 "
+                        "(BEDROCK_GUARDRAIL_ID 미설정 시와 동등). "
+                        "smoke / dry-run / 회귀 검증 용도.")
     return p.parse_args()
 
 
@@ -945,6 +949,7 @@ def main() -> int:
                 temperature=args.temperature,
                 max_retries=args.retries,
                 limit=args.limit,
+                no_guardrail=args.no_guardrail,
             )
             print(f"\n[{label}] DONE  total_in_run={sum(stats.by_stop.values())}  "
                   f"errors={stats.errors}  elapsed={stats.elapsed:.1f}s  "
