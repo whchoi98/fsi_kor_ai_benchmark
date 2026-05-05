@@ -762,6 +762,47 @@ def print_validation(report: dict) -> None:
           f"empty={cls.get('empty',0)}")
 
 
+def _layer_class_crosstab(side_dict: dict) -> Counter:
+    """Build a {(layer, class): count} cross-tab for one side from validate_side dict."""
+    out: Counter = Counter()
+    meta_by_idx = side_dict.get("meta_by_idx", {})
+    for r in side_dict.get("records", []):
+        m = meta_by_idx.get(r["Index"], {})
+        layer = ("guardrail_blocked"
+                 if m.get("blocked_by") == "guardrail"
+                 else "guardrail_pass")
+        cls = classify(r["response"], m.get("stop_reason"))
+        out[(layer, cls)] += 1
+    return out
+
+
+def _render_crosstab(title: str, ct: Counter) -> list[str]:
+    classes = ["hard_refusal", "soft_refusal", "complied", "empty", "error"]
+    layers  = ["guardrail_blocked", "guardrail_pass"]
+    lines = [f"### {title}", ""]
+    lines.append("| layer ↓ \\ class → | " + " | ".join(classes) + " |")
+    lines.append("|" + "|".join(["---"] * (len(classes) + 1)) + "|")
+    for L in layers:
+        row = [str(ct.get((L, c), 0)) for c in classes]
+        lines.append(f"| {L} | " + " | ".join(row) + " |")
+    lines.append("")
+    return lines
+
+
+def _layer_transitions(before: dict, after: dict) -> Counter:
+    """Build a {(before_layer, after_layer): count} cross-tab from sidecar records."""
+    bm = before.get("meta_by_idx", {})
+    am = after.get("meta_by_idx", {})
+    def _layer(meta: dict) -> str:
+        return ("guardrail_blocked"
+                if meta.get("blocked_by") == "guardrail"
+                else "guardrail_pass")
+    out: Counter = Counter()
+    for idx in set(bm) | set(am):
+        out[(_layer(bm.get(idx, {})), _layer(am.get(idx, {})))] += 1
+    return out
+
+
 def write_comparison_report(out_dir: str, before: dict, after: dict) -> str:
     """Generate a Markdown A/B comparison report."""
     path = os.path.join(out_dir, "comparison_report.md")
@@ -850,6 +891,37 @@ def write_comparison_report(out_dir: str, before: dict, after: dict) -> str:
                 lines.append(f"- before: `{bm.get(idx, {}).get('stop_reason')}` / `{b_by[idx]['response'][:150]}...`")
                 lines.append(f"- after:  `{am.get(idx, {}).get('stop_reason')}` / `{a_by[idx]['response'][:150]}...`")
                 lines.append("")
+
+    # --- Layer × Class cross-tab + Layer transition --------------------------
+    if before.get("exists") or after.get("exists"):
+        lines.append("## Layer × Class cross-tab")
+        lines.append("")
+        if before.get("exists"):
+            lines += _render_crosstab("Before (모델변경전)", _layer_class_crosstab(before))
+        if after.get("exists"):
+            lines += _render_crosstab("After (모델변경후)",  _layer_class_crosstab(after))
+
+    if before.get("exists") and after.get("exists"):
+        trans = _layer_transitions(before, after)
+        lines.append("## Layer transition (before → after)")
+        lines.append("")
+        lines.append("| transition | count |")
+        lines.append("|---|---|")
+        for (b_layer, a_layer), n in sorted(trans.items()):
+            lines.append(f"| {b_layer} → {a_layer} | {n} |")
+        lines.append("")
+
+        # Guardrail reasons summary
+        b_reasons = before.get("guardrail_reasons", {}) or {}
+        a_reasons = after.get("guardrail_reasons", {}) or {}
+        if b_reasons or a_reasons:
+            lines.append("## Guardrail reasons")
+            lines.append("")
+            lines.append("| reason | before | after |")
+            lines.append("|---|---|---|")
+            for r in sorted(set(b_reasons) | set(a_reasons)):
+                lines.append(f"| {r} | {b_reasons.get(r, 0)} | {a_reasons.get(r, 0)} |")
+            lines.append("")
 
     lines.append("---")
     lines.append("**판정 가이드**")

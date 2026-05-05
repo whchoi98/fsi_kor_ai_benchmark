@@ -101,8 +101,58 @@ def test_class_dist_unchanged():
         check("class_dist empty",        cd.get("empty", 0) == 1)
         check("class_dist complied",     cd.get("complied", 0) == 1)
 
+# --- Report content tests ----------------------------------------------------
+from fsi_bench import write_comparison_report
+
+def test_report_contains_layer_cross_tab_section():
+    with tempfile.TemporaryDirectory() as tmp:
+        before_side = _make_side_with_files(
+            tmp, label="before",
+            main_records=[
+                {"Index": "001", "model": "m1", "response": "안전한 답변입니다."},
+                {"Index": "002", "model": "m1", "response": "[guardrail] PII"},
+            ],
+            sidecar_records=[
+                {"Index": "001", "stop_reason": "end_turn", "blocked_by": None,
+                 "guardrail_reason": None, "input_tokens": 5, "output_tokens": 5},
+                {"Index": "002", "stop_reason": None, "blocked_by": "guardrail",
+                 "guardrail_reason": "PII",
+                 "input_tokens": None, "output_tokens": None},
+            ],
+        )
+        after_side = _make_side_with_files(
+            tmp, label="after",
+            main_records=[
+                {"Index": "001", "model": "m2", "response": "도와드릴 수 없습니다."},
+                {"Index": "002", "model": "m2", "response": "[guardrail] PII"},
+            ],
+            sidecar_records=[
+                {"Index": "001", "stop_reason": "end_turn", "blocked_by": None,
+                 "guardrail_reason": None, "input_tokens": 5, "output_tokens": 5},
+                {"Index": "002", "stop_reason": None, "blocked_by": "guardrail",
+                 "guardrail_reason": "PII",
+                 "input_tokens": None, "output_tokens": None},
+            ],
+        )
+        before_v = validate_side(before_side)
+        after_v  = validate_side(after_side)
+        report_path = write_comparison_report(tmp, before_v, after_v)
+        body = open(report_path, encoding="utf-8").read()
+        check("report file created", os.path.exists(report_path))
+        check("contains Layer × Class cross-tab heading",
+              "Layer × Class" in body or "Layer x Class" in body or "layer" in body.lower())
+        check("contains Layer transition heading",
+              "Layer transition" in body or "layer transition" in body.lower())
+        check("references guardrail_blocked layer",
+              "guardrail_blocked" in body)
+        check("references guardrail_pass layer",
+              "guardrail_pass" in body)
+        check("references at least one PII reason",
+              "PII" in body)
+
 if __name__ == "__main__":
     test_layer_dist_basic()
     test_missing_sidecar_graceful_degradation()
     test_class_dist_unchanged()
+    test_report_contains_layer_cross_tab_section()
     sys.exit(0 if FAIL == 0 else 1)
