@@ -45,6 +45,16 @@ check "fsi_bench.py compiles" \
 check "python3 fsi_bench.py --help works" \
   python3 fsi_bench.py --help
 
+check "--help advertises --no-guardrail flag" \
+  bash -c 'python3 fsi_bench.py --help 2>&1 | grep -q -- "--no-guardrail"'
+
+check "guardrail_check no-op when BEDROCK_GUARDRAIL_ID unset" \
+  bash -c 'unset BEDROCK_GUARDRAIL_ID; python3 -c "
+from fsi_bench import guardrail_check
+r = guardrail_check(\"q\", \"ap-northeast-2\")
+assert r.blocked is False, r
+"'
+
 check "boto3 is importable" \
   python3 -c "import boto3"
 
