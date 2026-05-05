@@ -17,6 +17,17 @@ AWS Bedrock 기반 한국어 LLM 모델 교체 시 jailbreak 안전성 회귀를
 
 `fsi-kor-ai-benchmark` is an A/B safety regression test harness for Korean LLM deployments on Amazon Bedrock. It runs all 300 prompts of the JailbreakBench (Korean translation) dataset against a "before" model and an "after" model, then produces a side-by-side report identifying any prompts where the new model becomes less safe than the old one. The tool is designed to satisfy the FSI (Financial Security Institute of Korea) submission format used for regulatory model-change verification.
 
+> **Deployed-posture framing.** This harness measures **deployed posture** regression
+> rather than raw model regression. Every prompt flows through (1) the company
+> guardrail and (2) a service with the company system prompt before its response
+> is recorded — capturing what the FSI evaluator (Financial Security Institute of
+> Korea) actually sees in production.
+>
+> Regulatory context: 금융위원회 「생성형 AI 모델 변경 시 혁신금융서비스 변경
+> 절차 개선 방안」 (2026.4.15. 정례회의 확정). The pre/post-change response
+> delta is the central input to the ①경미 / ②보통 / ③상당 classification.
+> Notice: https://sandbox.fintech.or.kr/support/notice_detail.do?lang=ko&id=3791
+
 ## Features
 
 - **300-prompt automated runner** — Sends the full JailbreakBench (KR) dataset to two Bedrock models concurrently with retry, throttling, and resume support.
@@ -127,6 +138,23 @@ fsi_kor_ai_benchmark/
 └── README.md                      # This file
 ```
 
+## Adapting to your stack (Fork-and-edit)
+
+This repo follows a **reference + fork-and-edit** pattern. You only need to
+modify two functions in `fsi_bench.py`:
+
+1. `guardrail_check(user_query, region) -> GuardrailResult` — reference uses
+   Amazon Bedrock Guardrails (`apply_guardrail`); replace the body to plug in
+   your own guardrail. Both `BEDROCK_GUARDRAIL_ID` and `BEDROCK_GUARDRAIL_VERSION`
+   unset → no-op pass (smoke-friendly).
+2. `build_system_prompt(side) -> str` — reference is an FSI + JailbreakBench
+   safety prompt; replace with your production system prompt. Branch on `side`
+   for prompt A/B (`if side == "after": return v2`).
+
+Everything else (progress/resume, FSI schema, concurrency, comparison report)
+should be left alone. See [docs/architecture.md](docs/architecture.md)
+"Fork-and-edit points" for the contracts these two functions must honor.
+
 ## Contributing
 
 1. Fork the repository on GitHub.
@@ -151,6 +179,16 @@ This project is released under the [MIT License](LICENSE). The bundled Jailbreak
 ## 개요
 
 `fsi-kor-ai-benchmark`는 Amazon Bedrock 기반 한국어 LLM 배포 환경에서 모델 교체 전후의 안전성 회귀를 검증하는 A/B 테스트 도구입니다. JailbreakBench 한국어판 300건 전체를 "변경 전" 모델과 "변경 후" 모델 양쪽에 동일하게 적용한 뒤, 동일 프롬프트에 대해 새 모델이 더 위험해진 케이스만을 자동으로 추출합니다. 본 도구는 금융보안원(FSI) 모델 변경 심사 양식에 맞춘 산출물을 생성하도록 설계되었습니다.
+
+> 이 harness는 raw 모델 회귀 진단이 아니라 **배포 자세(deployed posture) 회귀** 진단을
+> 위한 것입니다. 한 prompt가 (1) 회사 가드레일 → (2) 회사 system prompt가 적용된
+> 서비스 두 stage를 거친 후의 응답을 비교합니다. FSI 평가자(금융보안원)가 보는
+> "실제 사용자가 받을 응답"을 그대로 캡처합니다.
+>
+> 규제 배경: 금융위원회 「생성형 AI 모델 변경 시 혁신금융서비스 변경 절차 개선 방안」
+> (2026.4.15. 정례회의 확정). 모델 변경 전후 응답 변화도가 ①경미 / ②보통 / ③상당
+> 분류의 핵심 입력입니다. 자세한 내용:
+> https://sandbox.fintech.or.kr/support/notice_detail.do?lang=ko&id=3791
 
 ## 주요 기능
 
@@ -261,6 +299,27 @@ fsi_kor_ai_benchmark/
 ├── .gitignore                     # Python + 프로젝트 산출물 + secrets
 └── README.md                      # 본 파일
 ```
+
+## 회사 스택에 적용 (Fork-and-edit)
+
+본 repo는 **참조 구현 + fork-and-edit** 패턴입니다. 회사가 손대는 곳은 정확히
+`fsi_bench.py`의 두 함수입니다:
+
+1. `guardrail_check(user_query, region) -> GuardrailResult`
+   - 레퍼런스: Amazon Bedrock Guardrails (`apply_guardrail`).
+   - `BEDROCK_GUARDRAIL_ID` / `BEDROCK_GUARDRAIL_VERSION` 환경변수로 설정.
+   - 자체 가드레일을 쓰는 회사는 함수 본체를 자기 호출 코드로 교체.
+   - 둘 다 미설정 시 no-op pass — smoke / 미적용 환경에서 안전하게 동작.
+
+2. `build_system_prompt(side) -> str`
+   - 레퍼런스: FSI + JailbreakBench 통합 안전 지침 (8 카테고리).
+   - 회사 production system prompt로 본체 교체.
+   - `side` 인자 분기로 prompt-A/B 동시 평가도 가능 (`if side=="after": return v2`).
+
+다른 부분(progress/resume, FSI 스키마, 동시성, comparison report)은 그대로 두고
+이 두 함수만 자기 스택에 맞추면 됩니다. 두 함수의 contract는
+[docs/architecture.md](docs/architecture.md) "Fork-and-edit points" 절에서 자세히
+다룹니다.
 
 ## 기여 방법
 
