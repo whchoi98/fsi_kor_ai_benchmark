@@ -83,10 +83,123 @@ def test_invoke_one_omits_system_when_empty():
     check("empty system_prompt omitted from body",
           "system" not in captured["body"])
 
+# --- Section C: _process_one (per-prompt pipeline) ---------------------------
+from unittest.mock import patch
+from fsi_bench import _process_one, GuardrailResult, Side
+
+def _make_side(label="before", model_id="model-x", region="ap-northeast-2"):
+    return Side(label=label, target_nfc=f"모델변경{('전' if label=='before' else '후')}.jsonl",
+                model_id=model_id, region=region)
+
+def test_process_one_pass_path_calls_model():
+    """guardrail passes → _invoke_one is called and result fields populated."""
+    side = _make_side()
+    rt, captured = _make_fake_rt(text="안전한 답변")
+    with patch("fsi_bench._invoke_guardrail_one",
+               return_value=GuardrailResult(blocked=False, response_text=None, reason=None)):
+        rec, meta = _process_one(side, rt, "001", "오늘 날씨",
+                                 max_tokens=100, temperature=0.0, max_retries=1,
+                                 no_guardrail=False)
+    check("rec Index", rec["Index"] == "001")
+    check("rec model", rec["model"] == "model-x")
+    check("rec response from model", rec["response"] == "안전한 답변")
+    check("meta blocked_by None", meta["blocked_by"] is None)
+    check("meta guardrail_reason None", meta["guardrail_reason"] is None)
+    check("meta stop_reason populated", meta["stop_reason"] == "end_turn")
+    check("meta input_tokens populated", meta["input_tokens"] == 10)
+
+def test_process_one_blocked_path_skips_model():
+    """guardrail blocks → _invoke_one not called; response uses guardrail text."""
+    side = _make_side()
+    rt = MagicMock()
+    rt.invoke_model.side_effect = AssertionError("must not be called")
+    gr = GuardrailResult(blocked=True,
+                         response_text="[guardrail] PII 차단",
+                         reason="PII")
+    with patch("fsi_bench._invoke_guardrail_one", return_value=gr):
+        rec, meta = _process_one(side, rt, "002", "OO의 신용정보",
+                                 max_tokens=100, temperature=0.0, max_retries=1,
+                                 no_guardrail=False)
+    check("rec response from guardrail", rec["response"] == "[guardrail] PII 차단")
+    check("rec model preserved (side.model_id)", rec["model"] == "model-x")
+    check("meta blocked_by", meta["blocked_by"] == "guardrail")
+    check("meta guardrail_reason", meta["guardrail_reason"] == "PII")
+    check("meta stop_reason None", meta["stop_reason"] is None)
+    check("meta tokens None", meta["input_tokens"] is None and meta["output_tokens"] is None)
+
+def test_process_one_blocked_uses_default_refusal_when_text_missing():
+    """guardrail blocks but response_text=None → fall back to DEFAULT_GUARDRAIL_REFUSAL."""
+    side = _make_side()
+    rt = MagicMock()
+    rt.invoke_model.side_effect = AssertionError("must not be called")
+    gr = GuardrailResult(blocked=True, response_text=None, reason="JAILBREAK")
+    from fsi_bench import DEFAULT_GUARDRAIL_REFUSAL
+    with patch("fsi_bench._invoke_guardrail_one", return_value=gr):
+        rec, _meta = _process_one(side, rt, "003", "q",
+                                  max_tokens=100, temperature=0.0, max_retries=1,
+                                  no_guardrail=False)
+    check("falls back to DEFAULT_GUARDRAIL_REFUSAL",
+          rec["response"] == DEFAULT_GUARDRAIL_REFUSAL)
+
+def test_process_one_no_guardrail_bypasses_stage1():
+    """no_guardrail=True → guardrail not consulted; goes straight to model."""
+    side = _make_side()
+    rt, _captured = _make_fake_rt(text="ok")
+    called = {"n": 0}
+    def must_not_be_called(*a, **kw):
+        called["n"] += 1
+    with patch("fsi_bench._invoke_guardrail_one", side_effect=must_not_be_called):
+        rec, meta = _process_one(side, rt, "004", "q",
+                                 max_tokens=100, temperature=0.0, max_retries=1,
+                                 no_guardrail=True)
+    check("guardrail bypassed", called["n"] == 0)
+    check("model called (response set)", rec["response"] == "ok")
+    check("meta blocked_by None", meta["blocked_by"] is None)
+
+def test_process_one_guardrail_error_records_error():
+    """Permanent guardrail failure → record with error= prefix 'guardrail:'."""
+    side = _make_side()
+    rt = MagicMock()
+    rt.invoke_model.side_effect = AssertionError("must not be called")
+    from botocore.exceptions import ClientError
+    err = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "no perms"}},
+        "ApplyGuardrail",
+    )
+    with patch("fsi_bench._invoke_guardrail_one", side_effect=err):
+        rec, meta = _process_one(side, rt, "005", "q",
+                                 max_tokens=100, temperature=0.0, max_retries=1,
+                                 no_guardrail=False)
+    check("response carries error marker", rec["response"].startswith("<<ERROR:"))
+    check("error message has guardrail: prefix",
+          "guardrail:" in rec["response"])
+    check("meta stop_reason='error'", meta["stop_reason"] == "error")
+    check("meta blocked_by None (it's a runner error, not a guardrail block)",
+          meta["blocked_by"] is None)
+
+def test_process_one_passes_system_prompt_to_model():
+    """When stage 1 passes, build_system_prompt(side.label) is plumbed to _invoke_one."""
+    side = _make_side(label="after")
+    rt, captured = _make_fake_rt()
+    with patch("fsi_bench._invoke_guardrail_one",
+               return_value=GuardrailResult(blocked=False, response_text=None, reason=None)):
+        _process_one(side, rt, "006", "q",
+                     max_tokens=100, temperature=0.0, max_retries=1,
+                     no_guardrail=False)
+    check("body has 'system' (system_prompt was injected)",
+          isinstance(captured["body"].get("system"), str) and
+          len(captured["body"]["system"]) > 0)
+
 if __name__ == "__main__":
     test_system_prompt_returns_nonempty()
     test_system_prompt_covers_required_categories()
     test_system_prompt_side_invariant_by_default()
     test_invoke_one_passes_system_prompt_in_body()
     test_invoke_one_omits_system_when_empty()
+    test_process_one_pass_path_calls_model()
+    test_process_one_blocked_path_skips_model()
+    test_process_one_blocked_uses_default_refusal_when_text_missing()
+    test_process_one_no_guardrail_bypasses_stage1()
+    test_process_one_guardrail_error_records_error()
+    test_process_one_passes_system_prompt_to_model()
     sys.exit(0 if FAIL == 0 else 1)

@@ -471,9 +471,72 @@ def _load_progress(path: str) -> dict:
     return done
 
 
+def _process_one(side: Side, rt, idx: str, prompt: str,
+                 max_tokens: int, temperature: float, max_retries: int,
+                 *, no_guardrail: bool) -> tuple[dict, dict]:
+    """Per-prompt two-stage pipeline.
+
+    Returns (main_record, sidecar_record) — both ready for jsonl serialization.
+    Caller is responsible for write ordering and lock protection.
+    """
+    # ── Stage 1: Guardrail ──
+    if no_guardrail:
+        gr = GuardrailResult(blocked=False, response_text=None, reason=None)
+    else:
+        try:
+            gr = _invoke_guardrail_one(prompt, side.region, max_retries)
+        except Exception as e:  # ClientError / BotoCoreError / OSError after retries
+            err = f"<<ERROR:guardrail:{type(e).__name__}:{str(e)[:200]}>>"
+            rec = {"Index": idx, "model": side.model_id, "response": err}
+            meta = {
+                "Index": idx,
+                "stop_reason": "error",
+                "input_tokens": None,
+                "output_tokens": None,
+                "blocked_by": None,         # runner error, NOT a guardrail block
+                "guardrail_reason": None,
+            }
+            return rec, meta
+
+    if gr.blocked:
+        rec = {
+            "Index": idx,
+            "model": side.model_id,         # preserve which side the response is from
+            "response": gr.response_text or DEFAULT_GUARDRAIL_REFUSAL,
+        }
+        meta = {
+            "Index": idx,
+            "stop_reason": None,
+            "input_tokens": None,
+            "output_tokens": None,
+            "blocked_by": "guardrail",
+            "guardrail_reason": gr.reason,
+        }
+        return rec, meta
+
+    # ── Stage 2: Service ──
+    sys_prompt = build_system_prompt(side.label)
+    _idx, text, stop, usage = _invoke_one(
+        rt, side.model_id, idx, prompt,
+        max_tokens, temperature, max_retries,
+        system_prompt=sys_prompt,
+    )
+    rec = {"Index": idx, "model": side.model_id, "response": text}
+    meta = {
+        "Index": idx,
+        "stop_reason": stop,
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "blocked_by": None,
+        "guardrail_reason": None,
+    }
+    return rec, meta
+
+
 def run_side(side: Side, prompts: list[tuple[str, str]],
              workers: int, max_tokens: int, temperature: float,
-             max_retries: int, limit: Optional[int]) -> RunStats:
+             max_retries: int, limit: Optional[int],
+             *, no_guardrail: bool = False) -> RunStats:
     """Execute Bedrock invocations for one side. Returns RunStats."""
     print(f"\n┌── Running [{side.label}] ─────────────────────────────────────")
     print(f"│ model:  {side.model_id}")
@@ -504,33 +567,30 @@ def run_side(side: Side, prompts: list[tuple[str, str]],
     try:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {
-                ex.submit(_invoke_one, rt, side.model_id, idx, p,
-                          max_tokens, temperature, max_retries): idx
+                ex.submit(_process_one, side, rt, idx, p,
+                          max_tokens, temperature, max_retries,
+                          no_guardrail=no_guardrail): idx
                 for idx, p in todo
             }
             n = 0
             for fut in as_completed(futs):
                 n += 1
-                idx, text, stop, usage = fut.result()
-                rec = {"Index": idx, "model": side.model_id, "response": text}
-                meta = {
-                    "Index": idx,
-                    "stop_reason": stop,
-                    "output_tokens": usage.get("output_tokens"),
-                    "input_tokens": usage.get("input_tokens"),
-                }
+                rec, meta = fut.result()
+                stop = meta.get("stop_reason")
                 with lock:
                     pf.write(json.dumps(rec, ensure_ascii=False) + "\n"); pf.flush()
                     mf.write(json.dumps(meta, ensure_ascii=False) + "\n"); mf.flush()
-                stats.by_stop[stop] += 1
+                stats.by_stop[stop or "blocked"] += 1
                 if stop == "error":
                     stats.errors += 1
                 el = time.time() - t0
                 rate = n / el if el > 0 else 0.0
                 eta = (len(todo) - n) / rate if rate > 0 else 0.0
-                ot = usage.get("output_tokens", "-")
-                print(f"  [{side.label} {n:3d}/{len(todo)}] idx={idx} "
-                      f"stop={stop:<14s} out={str(ot):>4} | "
+                ot = meta.get("output_tokens")
+                blocked_marker = "[blocked]" if meta.get("blocked_by") else ""
+                print(f"  [{side.label} {n:3d}/{len(todo)}] idx={rec['Index']} "
+                      f"stop={(stop or 'guardrail_blocked'):<16s} "
+                      f"out={str(ot if ot is not None else '-'):>4} {blocked_marker} | "
                       f"rate={rate:.2f}/s eta={eta:5.0f}s err={stats.errors}",
                       flush=True)
     finally:
