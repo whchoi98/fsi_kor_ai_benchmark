@@ -47,6 +47,13 @@ case "$FPATH" in
     remind "fsi_bench.py changed — review:"
     remind "  • CLAUDE.md  '핵심 명령' / '핵심 모듈'"
     remind "  • docs/architecture.md  Components by Layer / Runtime Defaults / Key Design Decisions"
+    # Two-stage pipeline fork-and-edit points
+    if [ -f "$FPATH" ] && grep -qE 'guardrail_check|build_system_prompt' -- "$FPATH" 2>/dev/null; then
+      remind "  • fork-and-edit point touched (guardrail_check/build_system_prompt) — see docs/architecture.md 'Fork-and-edit points'"
+    fi
+    if [ -f "$FPATH" ] && grep -qE 'blocked_by|guardrail_reason' -- "$FPATH" 2>/dev/null; then
+      remind "  • sidecar field referenced (blocked_by/guardrail_reason) — see docs/architecture.md sidecar schema"
+    fi
     ;;
   *run_benchmark.sh)
     remind "run_benchmark.sh changed — review CLAUDE.md '핵심 명령' for new flags or workflow"
@@ -62,6 +69,11 @@ case "$FPATH" in
     ;;
   */docs/architecture.md)
     remind "architecture.md changed — verify the change is still consistent with fsi_bench.py and CLAUDE.md 'Auto-Sync Rules'"
+    ;;
+  *.env.example)
+    if [ -f "$FPATH" ] && grep -q 'BEDROCK_GUARDRAIL_' -- "$FPATH" 2>/dev/null; then
+      remind ".env.example BEDROCK_GUARDRAIL_* touched — verify CLAUDE.md '기술 스택' table reflects guardrail env vars"
+    fi
     ;;
 esac
 
