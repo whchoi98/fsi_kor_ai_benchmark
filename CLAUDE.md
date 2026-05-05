@@ -20,6 +20,7 @@ and produces an FSI-compliant submission package + comparison report.
 | Entry point | `run_benchmark.sh` — interactive bash wrapper |
 | Cloud | Amazon Bedrock (`bedrock-runtime` via `boto3`) |
 | Auth | `AWS_BEARER_TOKEN_BEDROCK` (preferred) or standard IAM creds |
+| Guardrail | `BEDROCK_GUARDRAIL_ID` / `BEDROCK_GUARDRAIL_VERSION` (둘 다 미설정 시 가드레일 stage no-op) |
 | Default region | `ap-northeast-2` |
 | Dataset | `doc/jailbreakbench.jsonl` — 300 Korean jailbreak prompts (read-only) |
 | Output schema | FSI submission format — `모델변경전.jsonl` / `모델변경후.jsonl` |
@@ -64,6 +65,7 @@ python3 fsi_bench.py \
   --before-model global.anthropic.claude-sonnet-4-5-20250929-v1:0 \
   --after-model  global.anthropic.claude-sonnet-4-6 \
   --before-region ap-northeast-2 --after-region ap-northeast-2
+# 옵션: --no-guardrail   # Stage 1 가드레일 bypass (BEDROCK_GUARDRAIL_ID 미설정 시와 동등)
 
 # 의존성 설치
 pip install -r requirements.txt
@@ -74,11 +76,15 @@ pip install -r requirements.txt
 | Function | Role |
 |---|---|
 | `repair_input()` | 깨진 JSONL(escape 누락·index 중복·필드 누락)을 사본에서 자동 복구 |
-| `_invoke_one()` | Bedrock `invoke_model` 호출, throttle 재시도, `stop_reason` 캡처 |
-| `run_side()` | 한 모델(side) 전체 300건 실행, progress 파일 쓰기, 재개 지원 |
+| `guardrail_check()` | **EDIT-ME 지점 #1**. 회사 가드레일 호출. 레퍼런스: Bedrock `apply_guardrail`. `BEDROCK_GUARDRAIL_ID` 미설정 시 no-op pass. |
+| `build_system_prompt(side)` | **EDIT-ME 지점 #2**. side별 system prompt 반환. 레퍼런스는 FSI + JailbreakBench 통합 안전 지침. |
+| `_invoke_one()` | Bedrock `invoke_model` 호출, throttle 재시도, `stop_reason` 캡처. **`system_prompt` 키워드 인자**로 system prompt 주입. |
+| `_invoke_guardrail_one()` | `guardrail_check()`을 throttle/transient 재시도로 감싸는 래퍼. 영구 실패 시 raise → `run_side`가 `error` record로 처리. |
+| `_process_one()` | 한 prompt에 대한 stage1(가드레일)→stage2(모델) 파이프라인. 차단 시 모델 호출 skip. |
+| `run_side()` | 한 모델(side) 전체 300건 실행, progress 파일 쓰기, 재개 지원. **`no_guardrail` 키워드 인자**로 stage 1 bypass 가능. |
 | `classify()` | 응답을 5-class로 분류: `hard_refusal`(Anthropic `stop_reason="refusal"`) / `soft_refusal`(키워드 매칭) / `complied`(거절 키워드 없음) / `empty`(빈 응답) / `error`(러너 측 오류) |
-| `validate_side()` | FSI 스키마 적합성 검사(필수 필드·index 1..300 커버리지·중복) **+ 모든 레코드에 `classify()` 적용**해 클래스 분포 산출 |
-| `write_comparison_report()` | A/B 회귀(거절 → 응답) 케이스만 추출한 마크다운 리포트 생성 |
+| `validate_side()` | FSI 스키마 적합성 검사(필수 필드·index 1..300 커버리지·중복) **+ 모든 레코드에 `classify()` 적용**해 클래스 분포 산출 **+ sidecar 기반 layer 분포(`guardrail_blocked` / `guardrail_pass`) + `guardrail_reasons` 카운트**. |
+| `write_comparison_report()` | A/B 회귀(거절 → 응답) 케이스 + **Layer × Class cross-tab + Layer transition + Guardrail reasons 표**. |
 
 ## 작업 시 관례 / Conventions
 
@@ -86,6 +92,8 @@ pip install -r requirements.txt
 - **응답 산출물은 한글 파일명**(`모델변경전.jsonl`, `모델변경후.jsonl`). NFC 정규화 사용 — 파일 시스템 호환성 때문에 `find_or_create_target()`이 검색을 처리한다. 직접 경로 하드코딩 금지.
 - **재개(resume) 우선**. 중간 실패 시 `*.progress.jsonl`을 읽어 이어가도록 설계됨. 재시도 로직을 추가할 때는 progress 쓰기 순서를 깨지 말 것.
 - **stop_reason은 메타데이터 사이드카에만**. 산출물 JSONL에는 FSI 스키마 외 필드 추가 금지.
+- **가드레일 차단 정보(`blocked_by`, `guardrail_reason`)도 sidecar에만**. FSI 메인 파일은 `{Index, model, response}` 세 필드 고정.
+- **가드레일이 차단한 record의 `model` 필드는 `side.model_id`로 유지** (어느 side의 결과인지 식별 보존). 차단 사실은 sidecar로만 표현.
 - **Bedrock 키는 환경변수로만**. `AWS_BEARER_TOKEN_BEDROCK`을 코드/설정 파일에 절대 박지 말 것.
 - **커밋 메시지**: Conventional Commits (`feat:`, `fix:`, `docs:`).
 
@@ -106,6 +114,9 @@ pip install -r requirements.txt
 - `classify()` 클래스 추가/변경 → 본 파일의 `classify()` 행과 `docs/architecture.md`의 분류기 설명·디자인 결정 동시 갱신
 - `--workers`/`--retries`/`--max-tokens`/`--temperature` 기본값 변경 → `docs/architecture.md`의 "Runtime Defaults" 표 갱신
 - 새 ADR(`docs/decisions/ADR-NNNN-*.md`) 또는 runbook(`docs/runbooks/*.md`) 작성 → 본 파일 "Reference" 섹션의 ADR/Runbook 하위 목록에 cross-reference 추가
+- `guardrail_check()` 또는 `build_system_prompt()` 시그니처/본문 변경 → 본 파일의 EDIT-ME 지점 표 + `docs/architecture.md`의 "Fork-and-edit points" 절 동시 갱신
+- sidecar 필드(`blocked_by`, `guardrail_reason` 등) 추가/변경 → 본 파일의 "작업 시 관례" 항목 + `docs/architecture.md`의 sidecar 스키마 표 갱신
+- 새 환경변수(`BEDROCK_GUARDRAIL_*` 등) 추가 → "기술 스택" 표 갱신 + `.env.example` 동기화
 
 ## Reference
 
@@ -113,6 +124,9 @@ pip install -r requirements.txt
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - ADRs: [docs/decisions/](docs/decisions/)
   - [ADR-0001 — Inference Profile Only](docs/decisions/ADR-0001-inference-profile-only.md) (Bedrock direct foundation ID 사용 금지)
+  - [ADR-0002 — Two-stage pipeline (guardrail → guarded service)](docs/decisions/ADR-0002-two-stage-pipeline.md)
 - Runbooks: [docs/runbooks/](docs/runbooks/)
   - [bedrock-model-access-denied](docs/runbooks/bedrock-model-access-denied.md) (LEGACY 게이트 / inference-profile / IAM 진단)
+  - [guardrail-troubleshooting](docs/runbooks/guardrail-troubleshooting.md) (env var, IAM, throttle 진단)
+- Regulatory context: 금융위원회 「생성형 AI 모델 변경 시 혁신금융서비스 변경 절차 개선 방안」 (2026.4.15. 정례회의 확정) — https://sandbox.fintech.or.kr/support/notice_detail.do?lang=ko&id=3791
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
