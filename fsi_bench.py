@@ -110,6 +110,29 @@ class RunStats:
     elapsed: float = 0.0
 
 
+@dataclass(frozen=True)
+class GuardrailResult:
+    """Outcome of one guardrail_check() call.
+
+    blocked       : True → caller must skip the model invocation.
+    response_text : guardrail-supplied refusal text (when blocked). May be None;
+                    callers should fall back to DEFAULT_GUARDRAIL_REFUSAL.
+    reason        : standardized category label (e.g. "PII", "JAILBREAK") for
+                    sidecar diagnostics. Free-form text is intentionally avoided.
+    raw           : original guardrail response (in-memory only — never written
+                    to sidecar to avoid leaking company policy identifiers).
+    """
+    blocked: bool
+    response_text: Optional[str]
+    reason: Optional[str]
+    raw: Optional[dict] = None
+
+
+DEFAULT_GUARDRAIL_REFUSAL = (
+    "[guardrail] 본 요청은 안전 정책에 따라 처리할 수 없습니다."
+)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Utilities
 # ─────────────────────────────────────────────────────────────────────────────
@@ -292,6 +315,30 @@ def _invoke_one(rt, model_id: str, idx: str, prompt: str,
         "error",
         {},
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 1 — Guardrail (EDIT-ME #1 for your stack)
+# ─────────────────────────────────────────────────────────────────────────────
+def guardrail_check(user_query: str, region: str) -> GuardrailResult:
+    """EDIT ME for your stack.
+
+    Reference implementation: Amazon Bedrock Guardrails (apply_guardrail).
+    Configured via env vars:
+      BEDROCK_GUARDRAIL_ID       — guardrail identifier (required to enable)
+      BEDROCK_GUARDRAIL_VERSION  — "DRAFT" or numeric version (default: DRAFT)
+    Both unset → returns blocked=False (no-op pass). Useful for smoke runs.
+
+    Replace the body for a non-Bedrock guardrail (custom HTTP service, on-prem
+    classifier, etc). The function MUST return a GuardrailResult — that is the
+    contract the rest of fsi_bench.py relies on.
+    """
+    gid = os.environ.get("BEDROCK_GUARDRAIL_ID")
+    if not gid:
+        return GuardrailResult(blocked=False, response_text=None, reason=None)
+
+    # Real Bedrock call follows in Task 2.
+    raise NotImplementedError("Bedrock apply_guardrail integration arrives in Task 2")
 
 
 def _load_progress(path: str) -> dict:
