@@ -123,6 +123,74 @@ Notes on the diagram:
 
 `doc/jailbreakbench.jsonl` ▶ `repair_input` ▶ `run_side(BEFORE)` (ThreadPool×8 → Bedrock) ▶ `모델변경전.jsonl + sidecars` ▶ `run_side(AFTER)` (ThreadPool×8 → Bedrock) ▶ `모델변경후.jsonl + sidecars` ▶ `validate_side ×2 (with classify)` ▶ `comparison_report.md` ▶ `submission_*.zip`
 
+### Two-stage pipeline
+
+Each prompt flows through two stages inside `_process_one()`:
+
+```
+prompt
+  │
+  ▼ Stage 1 — guardrail_check(prompt, region)        # EDIT-ME #1
+  │
+  ├─ blocked → main record: response = guardrail refusal text
+  │             sidecar: blocked_by="guardrail", guardrail_reason="<category>"
+  │             (model call skipped)
+  │
+  └─ pass → continue
+  │
+  ▼ Stage 2 — _invoke_one(model, prompt,
+                          system_prompt=build_system_prompt(side))   # EDIT-ME #2
+  │
+  ▼ main record: response = model output
+     sidecar: blocked_by=null, stop_reason, tokens
+```
+
+`run_side()` fans the 300 prompts of one side out through `ThreadPoolExecutor`,
+each worker invoking `_process_one()` and appending main + sidecar records under
+a shared lock. The two sides remain sequential (BEFORE fully drained before
+AFTER starts).
+
+#### Sidecar schema
+
+`output/모델변경전.jsonl.metadata.jsonl` (and the AFTER counterpart):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `Index` | string `"001".."300"` | FSI input Index |
+| `stop_reason` | string \| null | Anthropic stop_reason. Null on guardrail block. `"error"` on runner failure. |
+| `input_tokens` | int \| null | Model invocation tokens. Null when guardrail blocked. |
+| `output_tokens` | int \| null | Model invocation tokens. Null when guardrail blocked. |
+| `blocked_by` | `"guardrail"` \| null | NEW. Block layer. |
+| `guardrail_reason` | string \| null | NEW. Block category label (`PII`, `JAILBREAK`, …). |
+
+### Fork-and-edit points
+
+This harness is a **reference + fork-and-edit** project. Companies replace
+**exactly two function bodies** in `fsi_bench.py`:
+
+#### `guardrail_check(user_query, region) -> GuardrailResult`
+
+- Reference: Amazon Bedrock Guardrails (`apply_guardrail`).
+- Env vars: `BEDROCK_GUARDRAIL_ID`, `BEDROCK_GUARDRAIL_VERSION`. Both unset →
+  no-op pass.
+- Return contract: `GuardrailResult(blocked, response_text, reason, raw)`.
+  - `blocked=True` → caller skips the model call.
+  - `response_text` may be None; caller falls back to `DEFAULT_GUARDRAIL_REFUSAL`.
+  - `reason` must be a standardized category label (no free-form text or
+    company-internal policy IDs).
+  - `raw` is for debug only — never serialized into the sidecar.
+
+#### `build_system_prompt(side) -> str`
+
+- Reference: combined FSI + JailbreakBench safety prompt (8 categories).
+- `side` ∈ {`"before"`, `"after"`}. The reference returns the same prompt for
+  both sides.
+- For prompt A/B (system-prompt regression in addition to model regression),
+  branch in the body: `if side == "after": return v2`.
+
+Everything else (progress/resume, FSI schema, concurrency, comparison report)
+should not need to change for company forks.
+
 ### Key Design Decisions
 
 - **Single-file Python, not a package.** The runner is ~700 LOC and has one job (drive two Bedrock models, classify, report). A `src/` package with sub-modules would add navigation cost without meaningful separation.
@@ -147,6 +215,9 @@ These CLI defaults (`fsi_bench.py parse_args()`) directly affect cost, rate, and
 | `--reset` | `false` | Removes `*.progress.jsonl` and `*.metadata.jsonl` before running. **Destructive — defeats resume.** |
 | `--no-repair` | `false` | Skips `repair_input()`. Only use when the upstream dataset is known clean. |
 | `--only` | `both` | `before` / `after` / `both`. Lets a partial rerun skip a phase. |
+| `--no-guardrail` | `false` | Bypasses Stage 1 entirely (smoke / dry-run / regression-checking against raw model). Equivalent to running with `BEDROCK_GUARDRAIL_ID` unset. |
+| `BEDROCK_GUARDRAIL_ID` (env) | unset | Required to enable Stage 1. Both env vars unset → guardrail_check no-ops. |
+| `BEDROCK_GUARDRAIL_VERSION` (env) | `DRAFT` | Guardrail version to apply. |
 
 ### Operations
 
@@ -271,6 +342,70 @@ Python 단일 프로세스 CLI가 동일한 한국어 jailbreak 300건 데이터
 
 `doc/jailbreakbench.jsonl` ▶ `repair_input` ▶ `run_side(BEFORE)` (ThreadPool×8 → Bedrock) ▶ `모델변경전.jsonl + 사이드카` ▶ `run_side(AFTER)` (ThreadPool×8 → Bedrock) ▶ `모델변경후.jsonl + 사이드카` ▶ `validate_side ×2 (classify 포함)` ▶ `comparison_report.md` ▶ `submission_*.zip`
 
+### Two-stage pipeline
+
+`fsi_bench.py`의 한-prompt 처리는 두 stage로 구성된다:
+
+```
+prompt
+  │
+  ▼ Stage 1 — guardrail_check(prompt, region)        # EDIT-ME #1
+  │
+  ├─ blocked → 메인 record: response = 가드레일 거절 메시지
+  │             sidecar: blocked_by="guardrail", guardrail_reason="<카테고리>"
+  │             (모델 호출 skip)
+  │
+  └─ pass → continue
+  │
+  ▼ Stage 2 — _invoke_one(model, prompt,
+                          system_prompt=build_system_prompt(side))   # EDIT-ME #2
+  │
+  ▼ 메인 record: response = 모델 응답
+     sidecar: blocked_by=null, stop_reason, tokens
+```
+
+`run_side()`는 한 side(BEFORE 또는 AFTER)의 300건을 `ThreadPoolExecutor`로
+fan-out한다. 각 워커는 `_process_one()`을 호출해 위 두 stage를 직렬로 실행한 뒤
+progress/사이드카 파일에 lock 보호된 append를 한다. 양 side는 순차 실행 (병렬 X).
+
+#### 사이드카 스키마
+
+`output/모델변경전.jsonl.metadata.jsonl` (그리고 후 사이드 동등):
+
+| 필드 | 타입 | 의미 |
+|---|---|---|
+| `Index` | string `"001".."300"` | FSI 입력 Index |
+| `stop_reason` | string \| null | Anthropic stop_reason. 가드레일 차단 시 null. 러너 오류 시 `"error"`. |
+| `input_tokens` | int \| null | 모델 호출 토큰. 가드레일 차단 시 null. |
+| `output_tokens` | int \| null | 모델 호출 토큰. 가드레일 차단 시 null. |
+| `blocked_by` | `"guardrail"` \| null | NEW. 차단 레이어. |
+| `guardrail_reason` | string \| null | NEW. 차단 카테고리 라벨 (`PII`, `JAILBREAK` 등). |
+
+### Fork-and-edit points
+
+본 harness는 회사 스택에 적용될 때 **정확히 두 함수**의 본체만 교체된다:
+
+#### `guardrail_check(user_query, region) -> GuardrailResult`
+
+- 레퍼런스: Amazon Bedrock Guardrails (`apply_guardrail`).
+- 환경변수: `BEDROCK_GUARDRAIL_ID`, `BEDROCK_GUARDRAIL_VERSION`. 미설정 시
+  no-op pass.
+- 반환 contract: `GuardrailResult(blocked, response_text, reason, raw)`.
+  - `blocked=True`면 caller가 모델 호출을 skip한다.
+  - `response_text`가 None이면 caller가 `DEFAULT_GUARDRAIL_REFUSAL`로 fallback.
+  - `reason`은 표준 카테고리 라벨만 (자유문 / 정책 ID 금지).
+  - `raw`는 디버그 용도 — sidecar에 직렬화되지 않는다.
+
+#### `build_system_prompt(side) -> str`
+
+- 레퍼런스: FSI + JailbreakBench 통합 안전 지침 (8 카테고리).
+- `side` ∈ {`"before"`, `"after"`}. 기본 구현은 분기 없이 동일 prompt 반환.
+- 동적 prompt(prompt A/B 동시 평가)가 필요하면 `if side == "after": return v2`
+  형태로 본체에서 분기.
+
+이 두 함수 외의 코드(progress/resume, FSI 스키마, 동시성, comparison report)는
+회사가 수정할 필요 없다.
+
 ### 핵심 설계 결정
 
 - **단일 파일 Python, 패키지화 없음.** 러너는 ~700 LOC이고 역할도 하나(Bedrock 두 모델 호출 → 분류 → 리포트). `src/` 하위 모듈은 의미 있는 분리 없이 탐색 비용만 늘림.
@@ -295,6 +430,9 @@ Python 단일 프로세스 CLI가 동일한 한국어 jailbreak 300건 데이터
 | `--reset` | `false` | 실행 전 `*.progress.jsonl`·`*.metadata.jsonl` 삭제. **파괴적 — 재개 무효화.** |
 | `--no-repair` | `false` | `repair_input()` 건너뛰기. 입력이 깨끗한 게 확실할 때만. |
 | `--only` | `both` | `before` / `after` / `both`. 부분 재실행 시 한 phase 건너뛰기. |
+| `--no-guardrail` | `false` | Stage 1 가드레일 호출 완전 bypass (smoke / dry-run / raw model 회귀 검증용). `BEDROCK_GUARDRAIL_ID` 미설정과 동등. |
+| `BEDROCK_GUARDRAIL_ID` (env) | unset | Stage 1 활성화에 필요. 두 환경변수 모두 미설정 시 guardrail_check가 no-op. |
+| `BEDROCK_GUARDRAIL_VERSION` (env) | `DRAFT` | 적용할 가드레일 버전. |
 
 ### 운영
 
