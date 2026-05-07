@@ -20,7 +20,7 @@ and produces an FSI-compliant submission package + comparison report.
 | Entry point | `run_benchmark.sh` — interactive bash wrapper |
 | Cloud | Amazon Bedrock (`bedrock-runtime` via `boto3`) |
 | Auth | `AWS_BEARER_TOKEN_BEDROCK` (preferred) or standard IAM creds |
-| Guardrail | `BEDROCK_GUARDRAIL_ID` / `BEDROCK_GUARDRAIL_VERSION` (둘 다 미설정 시 가드레일 stage no-op) |
+| Guardrail | `FSI_GUARDRAIL_MODE`(`sample`이면 로컬 샘플) · `BEDROCK_GUARDRAIL_ID` / `BEDROCK_GUARDRAIL_VERSION`(Bedrock 모드, 둘 다 미설정 시 stage no-op) |
 | Default region | `ap-northeast-2` |
 | Dataset | `doc/jailbreakbench.jsonl` — 300 Korean jailbreak prompts (read-only) |
 | Output schema | FSI submission format — `모델변경전.jsonl` / `모델변경후.jsonl` |
@@ -66,6 +66,9 @@ python3 fsi_bench.py \
   --after-model  global.anthropic.claude-sonnet-4-6 \
   --before-region ap-northeast-2 --after-region ap-northeast-2
 # 옵션: --no-guardrail   # Stage 1 가드레일 bypass (BEDROCK_GUARDRAIL_ID 미설정 시와 동등)
+
+# 두-단계 파이프라인 end-to-end 시연 (AWS 가드레일 ID 없이 동작)
+FSI_GUARDRAIL_MODE=sample ./run_benchmark.sh --quick
 
 # 의존성 설치
 pip install -r requirements.txt
@@ -116,7 +119,8 @@ pip install -r requirements.txt
 - 새 ADR(`docs/decisions/ADR-NNNN-*.md`) 또는 runbook(`docs/runbooks/*.md`) 작성 → 본 파일 "Reference" 섹션의 ADR/Runbook 하위 목록에 cross-reference 추가
 - `guardrail_check()` 또는 `build_system_prompt()` 시그니처/본문 변경 → 본 파일의 EDIT-ME 지점 표 + `docs/architecture.md`의 "Fork-and-edit points" 절 동시 갱신
 - sidecar 필드(`blocked_by`, `guardrail_reason` 등) 추가/변경 → 본 파일의 "작업 시 관례" 항목 + `docs/architecture.md`의 sidecar 스키마 표 갱신
-- 새 환경변수(`BEDROCK_GUARDRAIL_*` 등) 추가 → "기술 스택" 표 갱신 + `.env.example` 동기화
+- 새 환경변수(`BEDROCK_GUARDRAIL_*`, `FSI_GUARDRAIL_MODE` 등) 추가 → "기술 스택" 표 갱신 + `.env.example` 동기화
+- `samples/` 하위 모듈 추가/변경(예: 새 샘플 가드레일·시스템 프롬프트) → 본 파일의 EDIT-ME 표 + `docs/architecture.md` "Fork-and-edit points" 절 동시 갱신
 
 ## Reference
 

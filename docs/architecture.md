@@ -171,8 +171,11 @@ This harness is a **reference + fork-and-edit** project. Companies replace
 #### `guardrail_check(user_query, region) -> GuardrailResult`
 
 - Reference: Amazon Bedrock Guardrails (`apply_guardrail`).
-- Env vars: `BEDROCK_GUARDRAIL_ID`, `BEDROCK_GUARDRAIL_VERSION`. Both unset →
-  no-op pass.
+- Modes (`FSI_GUARDRAIL_MODE` env):
+  - `sample` — local pattern-match (`samples/local_guardrail.py`); no AWS call.
+    Useful for end-to-end smoke before a real guardrail is provisioned.
+  - empty/unset — Bedrock Guardrails. Driven by `BEDROCK_GUARDRAIL_ID` /
+    `BEDROCK_GUARDRAIL_VERSION`. Both unset → no-op pass.
 - Return contract: `GuardrailResult(blocked, response_text, reason, raw)`.
   - `blocked=True` → caller skips the model call.
   - `response_text` may be None; caller falls back to `DEFAULT_GUARDRAIL_REFUSAL`.
@@ -216,8 +219,9 @@ These CLI defaults (`fsi_bench.py parse_args()`) directly affect cost, rate, and
 | `--no-repair` | `false` | Skips `repair_input()`. Only use when the upstream dataset is known clean. |
 | `--only` | `both` | `before` / `after` / `both`. Lets a partial rerun skip a phase. |
 | `--no-guardrail` | `false` | Bypasses Stage 1 entirely (smoke / dry-run / regression-checking against raw model). Equivalent to running with `BEDROCK_GUARDRAIL_ID` unset. |
-| `BEDROCK_GUARDRAIL_ID` (env) | unset | Required to enable Stage 1. Both env vars unset → guardrail_check no-ops. |
-| `BEDROCK_GUARDRAIL_VERSION` (env) | `DRAFT` | Guardrail version to apply. |
+| `FSI_GUARDRAIL_MODE` (env) | unset | `sample` → local pattern match (`samples/local_guardrail.py`). Empty → Bedrock Guardrails branch (below). |
+| `BEDROCK_GUARDRAIL_ID` (env) | unset | Required for Bedrock mode Stage 1. This **and** `FSI_GUARDRAIL_MODE` both unset → guardrail_check no-ops. |
+| `BEDROCK_GUARDRAIL_VERSION` (env) | `DRAFT` | Bedrock guardrail version to apply. |
 
 ### Operations
 
@@ -388,8 +392,11 @@ progress/사이드카 파일에 lock 보호된 append를 한다. 양 side는 순
 #### `guardrail_check(user_query, region) -> GuardrailResult`
 
 - 레퍼런스: Amazon Bedrock Guardrails (`apply_guardrail`).
-- 환경변수: `BEDROCK_GUARDRAIL_ID`, `BEDROCK_GUARDRAIL_VERSION`. 미설정 시
-  no-op pass.
+- 모드 (`FSI_GUARDRAIL_MODE` 환경변수):
+  - `sample` — 로컬 패턴 매칭(`samples/local_guardrail.py`); AWS 호출 없음.
+    실 가드레일 provision 전 end-to-end 스모크 용도.
+  - empty/unset — Bedrock Guardrails. `BEDROCK_GUARDRAIL_ID` /
+    `BEDROCK_GUARDRAIL_VERSION` 사용. 둘 다 미설정 시 no-op pass.
 - 반환 contract: `GuardrailResult(blocked, response_text, reason, raw)`.
   - `blocked=True`면 caller가 모델 호출을 skip한다.
   - `response_text`가 None이면 caller가 `DEFAULT_GUARDRAIL_REFUSAL`로 fallback.
@@ -431,8 +438,9 @@ progress/사이드카 파일에 lock 보호된 append를 한다. 양 side는 순
 | `--no-repair` | `false` | `repair_input()` 건너뛰기. 입력이 깨끗한 게 확실할 때만. |
 | `--only` | `both` | `before` / `after` / `both`. 부분 재실행 시 한 phase 건너뛰기. |
 | `--no-guardrail` | `false` | Stage 1 가드레일 호출 완전 bypass (smoke / dry-run / raw model 회귀 검증용). `BEDROCK_GUARDRAIL_ID` 미설정과 동등. |
-| `BEDROCK_GUARDRAIL_ID` (env) | unset | Stage 1 활성화에 필요. 두 환경변수 모두 미설정 시 guardrail_check가 no-op. |
-| `BEDROCK_GUARDRAIL_VERSION` (env) | `DRAFT` | 적용할 가드레일 버전. |
+| `FSI_GUARDRAIL_MODE` (env) | unset | `sample` → 로컬 패턴 매칭(`samples/local_guardrail.py`). 비워두면 아래 Bedrock 분기 사용. |
+| `BEDROCK_GUARDRAIL_ID` (env) | unset | Bedrock 모드에서 Stage 1 활성화에 필요. 본 변수와 `FSI_GUARDRAIL_MODE` 모두 미설정 시 guardrail_check가 no-op. |
+| `BEDROCK_GUARDRAIL_VERSION` (env) | `DRAFT` | 적용할 Bedrock 가드레일 버전. |
 
 ### 운영
 

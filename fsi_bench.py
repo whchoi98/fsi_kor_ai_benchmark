@@ -327,16 +327,28 @@ def _invoke_one(rt, model_id: str, idx: str, prompt: str,
 def guardrail_check(user_query: str, region: str) -> GuardrailResult:
     """EDIT ME for your stack.
 
-    Reference implementation: Amazon Bedrock Guardrails (apply_guardrail).
-    Configured via env vars:
-      BEDROCK_GUARDRAIL_ID       — guardrail identifier (required to enable)
-      BEDROCK_GUARDRAIL_VERSION  — "DRAFT" or numeric version (default: DRAFT)
-    Both unset → returns blocked=False (no-op pass). Useful for smoke runs.
+    Modes (selected by ``FSI_GUARDRAIL_MODE`` env var):
+      ``sample``  — bundled local pattern-match sample (no AWS call). Useful
+                    for end-to-end smoke before a real guardrail is provisioned.
+                    Implementation: ``samples/local_guardrail.py``.
+      empty/unset — Amazon Bedrock Guardrails reference (``apply_guardrail``).
+                    Configured via:
+                      BEDROCK_GUARDRAIL_ID       — guardrail identifier
+                      BEDROCK_GUARDRAIL_VERSION  — "DRAFT" or numeric (default DRAFT)
+                    If ``BEDROCK_GUARDRAIL_ID`` is also unset → no-op pass.
 
     Replace the body for a non-Bedrock guardrail (custom HTTP service, on-prem
     classifier, etc). The function MUST return a GuardrailResult — that is the
     contract the rest of fsi_bench.py relies on.
     """
+    mode = os.environ.get("FSI_GUARDRAIL_MODE", "").strip().lower()
+    if mode == "sample":
+        from samples.local_guardrail import match as _sample_match
+        blocked, text, reason = _sample_match(user_query)
+        return GuardrailResult(
+            blocked=blocked, response_text=text, reason=reason, raw=None,
+        )
+
     gid = os.environ.get("BEDROCK_GUARDRAIL_ID")
     if not gid:
         return GuardrailResult(blocked=False, response_text=None, reason=None)
