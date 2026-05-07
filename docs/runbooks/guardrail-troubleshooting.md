@@ -16,10 +16,30 @@
    이 플래그가 들어가면 stage 1이 완전히 bypass된다.
    - 확인: 스크립트 인자 / shell history.
 
-3. **가드레일 정책이 `INPUT` source를 평가하지 않도록 설정됨** —
+3. **`FSI_GUARDRAIL_MODE` 가 의도와 다른 값** — `sample` 이면 로컬 패턴 매칭만
+   동작하고 Bedrock 가드레일은 호출되지 않는다. 빈 값/unset 이어야 Bedrock 분기로
+   진입한다.
+   - 확인: `env | grep FSI_GUARDRAIL_MODE`
+   - 수정: `unset FSI_GUARDRAIL_MODE` 후 재실행.
+
+4. **가드레일 정책이 `INPUT` source를 평가하지 않도록 설정됨** —
    `apply_guardrail` 호출 시 `source="INPUT"`만 보내는데, 회사 가드레일이 OUTPUT
    전용으로 설정되어 있으면 항상 통과한다.
    - 확인: 콘솔에서 가드레일의 input/output filter 설정 검토.
+
+### Quick verification — dispatch 자체가 동작하는지
+
+위 1-4 가 모두 깨끗한데도 차단이 0 이라면, 먼저 dispatch 가 살아 있는지 sample
+mode 로 확인:
+
+```bash
+FSI_GUARDRAIL_MODE=sample ./run_benchmark.sh --quick
+grep -c '"blocked_by":"guardrail"' output/*.metadata.jsonl
+```
+
+sample mode 에서 차단이 1건 이상 나오면 **dispatch 자체는 정상**이고, 문제는
+Bedrock 가드레일 호출 / 정책 / IAM 단에 있다는 뜻 — 진단 범위가 좁혀진다.
+sample mode 에서도 0 이라면 코드/환경 변수 로드 문제(위 1, 2, 3) 를 다시 봐야 한다.
 
 ## Symptom: `<<ERROR:guardrail:AccessDeniedException...>>`
 

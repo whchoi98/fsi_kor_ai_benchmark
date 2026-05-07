@@ -158,6 +158,20 @@ bash tests/test_smoke.sh                   # 정적 체크 14건
 python3 fsi_bench.py --limit 5 --no-guardrail
 ```
 
+회사 가드레일이 아직 준비되지 않은 단계라면 — `samples/local_guardrail.py` 의
+패턴 매칭 샘플로 두-단계 파이프라인 자체를 end-to-end 검증할 수 있습니다 (AWS
+가드레일 ID 없이도 동작):
+
+```bash
+FSI_GUARDRAIL_MODE=sample ./run_benchmark.sh --quick
+```
+
+> **주의**: sample mode 결과는 **회사 production posture 가 아니라** 데모용입니다.
+> 서면확인서 첨부에는 부적합 — 실 제출 회차에서는 반드시 회사 가드레일을 사용하세요.
+
+명령어 단위 운영(중단 복구 / error record 부분 재시도 / 동시성 조절 등)은
+[Runbook: running-the-benchmark](runbooks/running-the-benchmark.md) 참조.
+
 ---
 
 ### Step 3 — Full A/B 실행 (1회, 30~60분)
@@ -351,6 +365,8 @@ grep -c '"blocked_by":"guardrail"' output/*.metadata.jsonl   # 0이면 가드레
   Bedrock 모델 ID 형식 규칙
 - [ADR-0002 — Two-stage pipeline](decisions/ADR-0002-two-stage-pipeline.md) —
   파이프라인 설계 의사결정
+- [Runbook: running-the-benchmark](runbooks/running-the-benchmark.md) —
+  Phase 별 명령어 + 복구 + 시나리오 quick-ref
 - [Runbook: guardrail-troubleshooting](runbooks/guardrail-troubleshooting.md) —
   가드레일 환경변수·IAM·throttle 진단
 - [Runbook: bedrock-model-access-denied](runbooks/bedrock-model-access-denied.md) —
@@ -371,8 +387,15 @@ grep -c '"blocked_by":"guardrail"' output/*.metadata.jsonl   # 0이면 가드레
 
 쓸 수 있지만, 그 경우 산출물은 **deployed posture**가 아닌 raw model 응답입니다.
 서면확인서 첨부용으로는 부적합합니다 (FSI 평가 기준이 production 스택 응답).
-가드레일 미적용 상태에서는 `--no-guardrail`로 명시적으로 stage 1을 끄고 raw
-benchmark만 수행할 수 있습니다.
+
+가드레일 미적용 상태에서 선택 가능한 두 모드:
+
+- `--no-guardrail` — Stage 1 을 완전히 bypass. 순수 raw 모델 회귀만 보고 싶을 때.
+- `FSI_GUARDRAIL_MODE=sample` — `samples/local_guardrail.py` 의 패턴 매칭 샘플
+  가드레일을 사용. 두-단계 파이프라인 동작 자체는 검증 가능 (JailbreakBench 300
+  건 중 ~14.7% 차단). 단 결과는 데모용이며 실 제출에는 부적합.
+
+자세한 시나리오·명령어: [Runbook: running-the-benchmark](runbooks/running-the-benchmark.md).
 
 **Q3. `--quick`은 5건만 호출하는데 왜 전체 600건을 또 돌려야 하나요?**
 

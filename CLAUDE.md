@@ -131,6 +131,7 @@ pip install -r requirements.txt
   - [ADR-0001 — Inference Profile Only](docs/decisions/ADR-0001-inference-profile-only.md) (Bedrock direct foundation ID 사용 금지)
   - [ADR-0002 — Two-stage pipeline (guardrail → guarded service)](docs/decisions/ADR-0002-two-stage-pipeline.md)
 - Runbooks: [docs/runbooks/](docs/runbooks/)
+  - [running-the-benchmark](docs/runbooks/running-the-benchmark.md) (Phase 별 명령어 + 복구 + 시나리오 quick-ref)
   - [bedrock-model-access-denied](docs/runbooks/bedrock-model-access-denied.md) (LEGACY 게이트 / inference-profile / IAM 진단)
   - [guardrail-troubleshooting](docs/runbooks/guardrail-troubleshooting.md) (env var, IAM, throttle 진단)
 - Regulatory context: 금융위원회 「생성형 AI 모델 변경 시 혁신금융서비스 변경 절차 개선 방안」 (2026.4.15. 정례회의 확정) — https://sandbox.fintech.or.kr/support/notice_detail.do?lang=ko&id=3791
