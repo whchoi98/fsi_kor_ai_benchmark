@@ -61,7 +61,7 @@ direct foundation ID 4.0:
 
 - `fsi_bench.py`의 `DEFAULT_BEFORE_MODEL`, `DEFAULT_AFTER_MODEL` 상수가 이미 `global.…` profile 형태이므로 코드 변경 불필요.
 - 향후 입력 검증 추가 시: model_id가 `^(eu|us|global|apac)\.` 패턴으로 시작하지 않으면 `parse_args()` 단계에서 거부할 것.
-- `tests/smoke.sh`에 정규식 검증을 추가하면 회귀 방지 가능 (선택적).
+- `tests/test_smoke.sh`에 정규식 검증을 추가하면 회귀 방지 가능 (선택적).
 
 ## References
 

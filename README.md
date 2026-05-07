@@ -93,6 +93,9 @@ python3 fsi_bench.py \
 | `AWS_PROFILE` | Named AWS CLI profile to source credentials from. | unset |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Static IAM credentials (alternative to bearer token). | unset |
 | `AWS_REGION` | Default region used when none is passed via `--before-region` / `--after-region`. | `ap-northeast-2` |
+| `FSI_GUARDRAIL_MODE` | Stage 1 dispatch. `sample` → `samples/local_guardrail.py` pattern match (no AWS call). Empty → Bedrock branch below. | unset |
+| `BEDROCK_GUARDRAIL_ID` | Bedrock Guardrail identifier. With this set and `FSI_GUARDRAIL_MODE` empty, Stage 1 calls `apply_guardrail`. | unset |
+| `BEDROCK_GUARDRAIL_VERSION` | Bedrock Guardrail version (`DRAFT` or numeric). | `DRAFT` |
 
 ## Project Structure
 
@@ -120,8 +123,13 @@ fsi_kor_ai_benchmark/
 │   ├── decisions/                 # Architecture Decision Records (ADRs)
 │   └── runbooks/                  # Operational playbooks
 │
-├── tests/
-│   └── smoke.sh                   # Light smoke test (no full TAP harness)
+├── samples/                       # Fork-friendly leaf modules
+│   └── local_guardrail.py         # Pattern-match sample guardrail (FSI_GUARDRAIL_MODE=sample)
+│
+├── tests/                         # Unit tests + shell harnesses
+│   ├── test_*.py                  # Plain-assert unit tests (classify / guardrail / pipeline / sample / layers)
+│   ├── test_smoke.sh              # Static smoke checks
+│   └── test_secret_scan.sh        # PreToolUse secret-scan hook
 │
 ├── .claude/                       # Claude Code config (settings.json + hooks)
 │   ├── settings.json              # PreToolUse secret-scan + permission deny list
@@ -146,7 +154,9 @@ modify two functions in `fsi_bench.py`:
 1. `guardrail_check(user_query, region) -> GuardrailResult` — reference uses
    Amazon Bedrock Guardrails (`apply_guardrail`); replace the body to plug in
    your own guardrail. Both `BEDROCK_GUARDRAIL_ID` and `BEDROCK_GUARDRAIL_VERSION`
-   unset → no-op pass (smoke-friendly).
+   unset → no-op pass (smoke-friendly). For an AWS-free end-to-end smoke set
+   `FSI_GUARDRAIL_MODE=sample` to dispatch to the bundled pattern-match guardrail
+   in `samples/local_guardrail.py` (demo only — not for FSI submission).
 2. `build_system_prompt(side) -> str` — reference is an FSI + JailbreakBench
    safety prompt; replace with your production system prompt. Branch on `side`
    for prompt A/B (`if side == "after": return v2`).
@@ -255,6 +265,9 @@ python3 fsi_bench.py \
 | `AWS_PROFILE` | 자격증명을 가져올 AWS CLI 프로파일 이름. | 미설정 |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 정적 IAM 자격증명 (bearer token 대안). | 미설정 |
 | `AWS_REGION` | `--before-region` / `--after-region`이 지정되지 않을 때 사용할 기본 리전. | `ap-northeast-2` |
+| `FSI_GUARDRAIL_MODE` | Stage 1 dispatch. `sample` → `samples/local_guardrail.py` 로컬 패턴 매칭 (AWS 호출 없음). 비어 있으면 아래 Bedrock 분기. | 미설정 |
+| `BEDROCK_GUARDRAIL_ID` | Bedrock 가드레일 식별자. 본 변수 + `FSI_GUARDRAIL_MODE` 비어있으면 `apply_guardrail` 호출. | 미설정 |
+| `BEDROCK_GUARDRAIL_VERSION` | Bedrock 가드레일 버전 (`DRAFT` 또는 숫자). | `DRAFT` |
 
 ## 프로젝트 구조
 
@@ -282,8 +295,13 @@ fsi_kor_ai_benchmark/
 │   ├── decisions/                 # 아키텍처 의사결정 기록 (ADR)
 │   └── runbooks/                  # 운영 플레이북
 │
-├── tests/
-│   └── smoke.sh                   # 라이트 스모크 테스트 (TAP 풀 하네스 아님)
+├── samples/                       # Fork 친화적 leaf 모듈
+│   └── local_guardrail.py         # 패턴 매칭 샘플 가드레일 (FSI_GUARDRAIL_MODE=sample)
+│
+├── tests/                         # 단위 테스트 + 셸 하니스
+│   ├── test_*.py                  # plain-assert 단위 테스트 (classify / guardrail / pipeline / sample / layers)
+│   ├── test_smoke.sh              # 정적 스모크 검사
+│   └── test_secret_scan.sh        # PreToolUse secret-scan 훅
 │
 ├── .claude/                       # Claude Code 설정 (settings.json + hooks)
 │   ├── settings.json              # PreToolUse secret-scan + permission deny 목록
@@ -310,6 +328,9 @@ fsi_kor_ai_benchmark/
    - `BEDROCK_GUARDRAIL_ID` / `BEDROCK_GUARDRAIL_VERSION` 환경변수로 설정.
    - 자체 가드레일을 쓰는 회사는 함수 본체를 자기 호출 코드로 교체.
    - 둘 다 미설정 시 no-op pass — smoke / 미적용 환경에서 안전하게 동작.
+   - AWS 자원 없이 두-단계 파이프라인을 end-to-end 검증하려면
+     `FSI_GUARDRAIL_MODE=sample` 으로 `samples/local_guardrail.py` 패턴 매칭
+     샘플 사용 (데모 전용 — 실 FSI 제출에는 부적합).
 
 2. `build_system_prompt(side) -> str`
    - 레퍼런스: FSI + JailbreakBench 통합 안전 지침 (8 카테고리).

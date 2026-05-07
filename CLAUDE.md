@@ -31,6 +31,8 @@ and produces an FSI-compliant submission package + comparison report.
 .
 ├── fsi_bench.py        # Python CLI runner — Bedrock invocation, retry, classify, report
 ├── run_benchmark.sh    # Interactive shell entrypoint (preset menu, smoke test, --quick/--report/--submit)
+├── samples/            # Fork-friendly leaf modules (활성화 시 FSI_GUARDRAIL_MODE=sample)
+│   └── local_guardrail.py     # Pattern-match sample guardrail — 5 reason categories (~14.7% JBB hit rate)
 ├── doc/                # READ-ONLY spec — never write here
 │   ├── jailbreakbench.jsonl   # 300 input prompts
 │   └── output_format/         # Submission skeleton (placeholder JSONL)
@@ -41,7 +43,7 @@ and produces an FSI-compliant submission package + comparison report.
 │   ├── comparison_report.md                  # A/B regression report
 │   └── submission_*.zip                      # Validated submission packages
 ├── docs/               # Project docs (architecture, ADRs, runbooks)
-├── tests/              # smoke.sh — light smoke check (no full TAP harness)
+├── tests/              # plain-assert unit tests (test_*.py) + test_smoke.sh / test_secret_scan.sh shell harnesses
 └── .claude/            # Claude Code config (hooks, settings)
 ```
 
@@ -79,7 +81,7 @@ pip install -r requirements.txt
 | Function | Role |
 |---|---|
 | `repair_input()` | 깨진 JSONL(escape 누락·index 중복·필드 누락)을 사본에서 자동 복구 |
-| `guardrail_check()` | **EDIT-ME 지점 #1**. 회사 가드레일 호출. 레퍼런스: Bedrock `apply_guardrail`. `BEDROCK_GUARDRAIL_ID` 미설정 시 no-op pass. |
+| `guardrail_check()` | **EDIT-ME 지점 #1**. `FSI_GUARDRAIL_MODE` 로 dispatch — `sample` 이면 `samples/local_guardrail.py`, 비어 있으면 Bedrock `apply_guardrail`(`BEDROCK_GUARDRAIL_ID` 미설정 시 no-op pass). 회사 자체 가드레일은 본체 교체. |
 | `build_system_prompt(side)` | **EDIT-ME 지점 #2**. side별 system prompt 반환. 레퍼런스는 FSI + JailbreakBench 통합 안전 지침. |
 | `_invoke_one()` | Bedrock `invoke_model` 호출, throttle 재시도, `stop_reason` 캡처. **`system_prompt` 키워드 인자**로 system prompt 주입. |
 | `_invoke_guardrail_one()` | `guardrail_check()`을 throttle/transient 재시도로 감싸는 래퍼. 영구 실패 시 raise → `run_side`가 `error` record로 처리. |
